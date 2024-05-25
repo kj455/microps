@@ -108,6 +108,19 @@ int net_device_output(struct net_device *dev, uint16_t type,
  * NOTE: must not be call after net_run()
  */
 int
+net_device_add_iface(struct net_device *dev, struct net_iface *iface)
+{
+}
+
+struct net_iface *
+net_device_get_iface(struct net_device *dev, int family)
+{
+}
+
+/*
+ * NOTE: must not be call after net_run()
+ */
+int
 net_protocol_register(uint16_t type, net_protocol_handler_t handler)
 {
   struct net_protocol *proto;
