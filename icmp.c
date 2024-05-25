@@ -1,10 +1,16 @@
 #include <stddef.h>
+<<<<<<< HEAD
 #include <stdint.h>
 #include <stdio.h>
+=======
+#include <string.h>
+>>>>>>> 79fe7c1 (Skeleton of step9)
 
 #include "util.h"
 #include "ip.h"
 #include "icmp.h"
+
+#define ICMP_BUFSIZ IP_PAYLOAD_SIZE_MAX
 
 #define icmp_type com.type
 #define icmp_code com.code
@@ -124,10 +130,17 @@ static void icmp_input(const struct ip_hdr *iphdr, const uint8_t *data,
   icmp_print(data, len);
 }
 
-int icmp_init(void) {
-  if (ip_protocol_register(IP_PROTOCOL_ICMP, icmp_input) == -1) {
-    errorf("ip_protocol_register() failure");
-    return -1;
-  }
-  return 0;
+int
+icmp_output(uint8_t type, uint8_t code, uint32_t val, const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst)
+{
+}
+
+int
+icmp_init(void)
+{
+    if (ip_protocol_register(IP_PROTOCOL_ICMP, icmp_input) == -1) {
+        errorf("ip_protocol_register() failure");
+        return -1;
+    }
+    return 0;
 }
