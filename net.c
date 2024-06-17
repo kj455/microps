@@ -15,6 +15,13 @@ struct net_protocol {
   net_protocol_handler_t handler;
 };
 
+struct net_protocol_queue_entry {
+  struct queue_entry entry;
+  struct net_device *dev;
+  size_t len;
+  /* data bytes exists after this structure. */
+};
+
 /*
  * NOTE: if you want to add/delete the entries after net_run(),
  *       you need to protect these lists with a lock.
@@ -160,6 +167,13 @@ int net_protocol_register(uint16_t type, net_protocol_handler_t handler) {
   return 0;
 }
 
+static struct net_protocol_queue_entry *
+net_protocol_queue_push(struct net_protocol *proto, const uint8_t *data,
+                        size_t len, struct net_device *dev) {}
+
+static struct net_protocol_queue_entry *
+net_protocol_queue_pop(struct net_protocol *proto) {}
+
 int net_input(uint16_t type, const uint8_t *data, size_t len,
               struct net_device *dev) {
   struct net_protocol *proto;
@@ -175,6 +189,12 @@ int net_input(uint16_t type, const uint8_t *data, size_t len,
   /* unsupported protocol */
   return 0;
 }
+
+void net_softirq_handler(unsigned int irq, void *arg) {}
+
+#include "arp.h"
+#include "icmp.h"
+#include "ip.h"
 
 int net_init(void) {
   infof("initialize...");
