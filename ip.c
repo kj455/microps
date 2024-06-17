@@ -25,6 +25,14 @@ struct ip_protocol {
   ip_protocol_handler_t handler;
 };
 
+struct ip_route {
+  struct ip_route *next;
+  ip_addr_t network;
+  ip_addr_t netmask;
+  ip_addr_t nexthop;
+  struct ip_iface *iface;
+};
+
 const ip_addr_t IP_ADDR_ANY = 0x00000000;       /* 0.0.0.0 */
 const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
 
@@ -34,6 +42,7 @@ const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
  */
 static struct ip_iface *ifaces;
 static struct ip_protocol *protocols;
+static struct ip_route *routes;
 
 int ip_addr_pton(const char *p, ip_addr_t *n) {
   char *sp, *ep;
@@ -57,6 +66,22 @@ int ip_addr_pton(const char *p, ip_addr_t *n) {
   }
   return 0;
 }
+
+/*
+ * NOTE: must not be call after net_run()
+ */
+static struct ip_route *ip_route_add(ip_addr_t network, ip_addr_t netmask,
+                                     ip_addr_t nexthop,
+                                     struct ip_iface *iface) {}
+
+static struct ip_route *ip_route_lookup(ip_addr_t dst) {}
+
+/*
+ * NOTE: must not be call after net_run()
+ */
+int ip_route_set_default_gateway(struct ip_iface *iface, const char *gateway) {}
+
+struct ip_iface *ip_route_get_iface(ip_addr_t dst) {}
 
 struct ip_iface *ip_iface_alloc(const char *unicast, const char *netmask) {
   struct ip_iface *iface;
