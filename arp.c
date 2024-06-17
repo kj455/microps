@@ -195,6 +195,11 @@ static int arp_reply(struct net_iface *iface, const uint8_t *tha, ip_addr_t tpa,
                            sizeof(reply), tha);
 }
 
+static int
+arp_request(struct net_iface *iface, ip_addr_t tpa)
+{
+}
+
 static void arp_input(const uint8_t *data, size_t len, struct net_device *dev) {
   struct arp_ether_ip *msg;
   ip_addr_t spa, tpa;
