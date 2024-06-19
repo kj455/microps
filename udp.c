@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -113,6 +114,8 @@ static struct udp_pcb *udp_pcb_select(ip_endp_t key) {
   }
   return NULL;
 }
+static ssize_t udp_output(ip_endp_t src, ip_endp_t dst, const uint8_t *data,
+                          size_t len) {}
 
 static void udp_print(const uint8_t *data, size_t len) {
   struct udp_hdr *hdr;
@@ -273,3 +276,8 @@ int udp_cmd_bind(int desc, ip_endp_t local) {
   lock_release(&lock);
   return 0;
 }
+
+ssize_t udp_cmd_recvfrom(int desc, uint8_t *buf, size_t size,
+                         ip_endp_t *remote) {}
+
+ssize_t udp_cmd_sendto(int desc, uint8_t *data, size_t len, ip_endp_t remote) {}
