@@ -49,6 +49,9 @@
     (x)->state = (y);                                                          \
   } while (0);
 
+#define TCP_DEFAULT_RTO 200000  /* micro seconds */
+#define TCP_RETRANS_DEADLINE 12 /* seconds */
+
 struct pseudo_hdr {
   uint32_t src;
   uint32_t dst;
@@ -97,6 +100,17 @@ struct tcp_pcb {
   uint16_t mss;        // maximum segment size
   uint8_t buf[65535];  /* receive buffer */
   struct sched_task task;
+};
+
+struct tcp_queue_entry {
+  struct queue_entry entry;
+  struct timeval first;
+  struct timeval last;
+  unsigned int rto; /* micro seconds */
+  uint32_t seq;
+  uint8_t flg;
+  size_t len;
+  /* data bytes exists after this structure. */
 };
 
 struct seg_info {
@@ -323,15 +337,29 @@ static ssize_t tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg,
   return len;
 }
 
+/*
+ * TCP Retransmit
+ *
+ * NOTE: TCP Retransmit functions must be called after locked
+ */
+
+static int tcp_retrans_queue_add(struct tcp_pcb *pcb, uint32_t seq, uint8_t flg,
+                                 const uint8_t *data, size_t len) {}
+
+static void tcp_retrans_queue_cleanup(struct tcp_pcb *pcb) {}
+
+static void tcp_retrans_emit(void *arg, struct queue_entry *_entry) {}
+
 static ssize_t tcp_output(struct tcp_pcb *pcb, uint8_t flg, const uint8_t *data,
                           size_t len) {
   uint32_t seq;
+
   seq = pcb->snd.nxt;
   if (TCP_FLG_ISSET(flg, TCP_FLG_SYN)) {
     seq = pcb->iss;
   }
   if (TCP_FLG_ISSET(flg, TCP_FLG_SYN | TCP_FLG_FIN) || len) {
-    // TODO: add retransmission queue
+    /* TODO: add retransmission queue */
   }
   return tcp_output_segment(seq, pcb->rcv.nxt, flg, pcb->rcv.wnd, data, len,
                             pcb->local, pcb->remote);
