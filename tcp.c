@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -643,4 +644,14 @@ int tcp_cmd_close(int desc) {
   tcp_pcb_release(pcb);
   lock_release(&lock);
   return 0;
+}
+
+ssize_t
+tcp_cmd_send(int desc, uint8_t *data, size_t len)
+{
+}
+
+ssize_t
+tcp_cmd_receive(int desc, uint8_t *buf, size_t size)
+{
 }
