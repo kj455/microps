@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -319,6 +320,9 @@ static ssize_t tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg,
   return len;
 }
 
+static ssize_t tcp_output(struct tcp_pcb *pcb, uint8_t flg, const uint8_t *data,
+                          size_t len) {}
+
 /* rfc793 - section 3.9 [Event Processing > SEGMENT ARRIVES] */
 static void tcp_segment_arrives(struct seg_info *seg, uint8_t flags,
                                 const uint8_t *data, size_t len,
@@ -344,7 +348,87 @@ static void tcp_segment_arrives(struct seg_info *seg, uint8_t flags,
     }
     return;
   }
-  // TODO: implement
+  switch (pcb->state) {
+  case TCP_STATE_LISTEN:
+    /*
+     * 1st check for an RST
+     */
+
+    /*
+     * 2nd check for an ACK
+     */
+
+    /*
+     * 3rd check for an SYN
+     */
+
+    /*
+     * 4th other text or control
+     */
+
+    /* drop segment */
+    return;
+  case TCP_STATE_SYN_SENT:
+    /*
+     * 1st check the ACK bit
+     */
+
+    /*
+     * 2nd check the RST bit
+     */
+
+    /*
+     * 3rd check security and precedence (ignore)
+     */
+
+    /*
+     * 4th check the SYN bit
+     */
+
+    /*
+     * 5th, if neither of the SYN or RST bits is set then drop the segment and
+     * return
+     */
+
+    /* drop segment */
+    return;
+  }
+  /*
+   * Otherwise
+   */
+
+  /*
+   * 1st check sequence number
+   */
+
+  /*
+   * 2nd check the RST bit
+   */
+
+  /*
+   * 3rd check security and precedence (ignore)
+   */
+
+  /*
+   * 4th check the SYN bit
+   */
+
+  /*
+   * 5th check the ACK field
+   */
+
+  /*
+   * 6th, check the URG bit (ignore)
+   */
+
+  /*
+   * 7th, process the segment text
+   */
+
+  /*
+   * 8th, check the FIN bit
+   */
+  return;
 }
 
 static void tcp_input(const struct ip_hdr *iphdr, const uint8_t *data,
@@ -412,3 +496,11 @@ int tcp_init(void) {
   }
   return 0;
 }
+
+/*
+ * TCP User Command
+ */
+
+int tcp_cmd_open(ip_endp_t local, ip_endp_t remote, int active) {}
+
+int tcp_cmd_close(int desc) {}
