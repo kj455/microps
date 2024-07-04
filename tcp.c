@@ -1199,6 +1199,8 @@ RETRY:
   return sent;
 }
 
+int tcp_cmd_socket(void) {}
+
 ssize_t tcp_cmd_receive(int desc, uint8_t *buf, size_t size) {
   struct tcp_pcb *pcb;
   size_t remain, len;
@@ -1250,3 +1252,11 @@ RETRY:
   lock_release(&lock);
   return len;
 }
+
+int tcp_cmd_connect(int desc, ip_endp_t remote) {}
+
+int tcp_cmd_bind(int desc, ip_endp_t local) {}
+
+int tcp_cmd_listen(int desc, int backlog) {}
+
+int tcp_cmd_accept(int desc, ip_endp_t *remote) {}
