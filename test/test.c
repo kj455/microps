@@ -51,10 +51,13 @@ cleanup(void)
     return 0;
 }
 
-static int
-app_main(void)
-{
-    return 0;
+static int app_main(void) {
+  debugf("press Ctrl+C to terminate");
+  while (!terminate) {
+    sleep(1);
+  }
+  debugf("terminated");
+  return 0;
 }
 
 int
