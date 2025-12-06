@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  microps:
+    build: .
+    container_name: microps-dev
+    volumes:
+      # ホストのカレントディレクトリをコンテナの/workspaceにマウント
+      - .:/workspace
+    working_dir: /workspace
+    # ネットワーク設定
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun
+    # コンテナを起動し続ける
+    stdin_open: true
+    tty: true
+    command: /bin/bash

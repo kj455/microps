@@ -1,0 +1,4 @@
+.git
+*.o
+*.exe
+.DS_Store
