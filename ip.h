@@ -18,16 +18,16 @@
 typedef uint32_t ip_addr_t;
 
 struct ip_hdr {
-    uint8_t vhl;
-    uint8_t tos;
-    uint16_t total;
-    uint16_t id;
-    uint16_t offset;
-    uint8_t ttl;
-    uint8_t protocol;
-    uint16_t sum;
-    ip_addr_t src;
-    ip_addr_t dst;
+  uint8_t vhl; // version(4) + header length(4)
+  uint8_t tos;
+  uint16_t total;
+  uint16_t id;
+  uint16_t offset; // flag(3) + fragment offset(13)
+  uint8_t ttl;
+  uint8_t protocol;
+  uint16_t sum;
+  ip_addr_t src;
+  ip_addr_t dst;
 };
 
 extern const ip_addr_t IP_ADDR_ANY;
