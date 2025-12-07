@@ -218,20 +218,99 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
   ip_print(data, total);
 }
 
-static int
-ip_output_device(struct ip_iface *iface, const uint8_t *data, size_t len, ip_addr_t target)
-{
+static int ip_output_device(struct ip_iface *iface, const uint8_t *data,
+                            size_t len, ip_addr_t target) {
+  char addr[IP_ADDR_STR_LEN];
+  uint8_t hwaddr[NET_DEVICE_ADDR_LEN] = {};
+
+  ip_addr_ntop(target, addr, sizeof(addr));
+  debugf("dev=%s, len=%zu, target=%s", NET_IFACE(iface)->dev->name, len, addr);
+  if (NET_IFACE(iface)->dev->flags & NET_DEVICE_FLAG_NEED_ARP) {
+    if (target == iface->broadcast || target == IP_ADDR_BROADCAST) {
+      memcpy(hwaddr, NET_IFACE(iface)->dev->broadcast,
+             NET_IFACE(iface)->dev->alen);
+    } else {
+      errorf("arp not supported");
+      return -1;
+    }
+  }
+  return net_device_output(NET_IFACE(iface)->dev, NET_PROTOCOL_TYPE_IP, data,
+                           len, hwaddr);
 }
 
-static ssize_t
-ip_build_packet(uint8_t protocol, const uint8_t *data, size_t len, uint16_t id,
-                uint16_t offset, ip_addr_t src, ip_addr_t dst, uint8_t *buf, size_t size)
-{
+static ssize_t ip_build_packet(uint8_t protocol, const uint8_t *data,
+                               size_t len, uint16_t id, uint16_t offset,
+                               ip_addr_t src, ip_addr_t dst, uint8_t *buf,
+                               size_t size) {
+  uint16_t hlen, total;
+  struct ip_hdr *hdr;
+
+  hlen = IP_HDR_SIZE_MIN;
+  total = hlen + len;
+  if (size < total) {
+    errorf("too long, total=%u", total);
+    return -1;
+  }
+  hdr = (struct ip_hdr *)buf;
+  hdr->vhl = (IP_VERSION_IPV4 << 4) | (hlen >> 2);
+  hdr->tos = 0;
+  hdr->total = hton16(total);
+  hdr->id = hton16(id);
+  hdr->offset = hton16(offset);
+  hdr->ttl = 0xff;
+  hdr->protocol = protocol;
+  hdr->sum = 0;
+  hdr->src = src;
+  hdr->dst = dst;
+  hdr->sum = cksum16((uint16_t *)hdr, hlen, 0); /* don't convert byteorder */
+  memcpy(buf + hlen, data, len);
+  ip_print(buf, total);
+  return (ssize_t)total;
 }
 
-ssize_t
-ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst)
-{
+ssize_t ip_output(uint8_t protocol, const uint8_t *data, size_t len,
+                  ip_addr_t src, ip_addr_t dst) {
+  char addr1[IP_ADDR_STR_LEN];
+  char addr2[IP_ADDR_STR_LEN];
+  struct ip_iface *iface;
+  uint16_t id;
+  ssize_t plen;
+  uint8_t buf[IP_TOTAL_SIZE_MAX];
+
+  ip_addr_ntop(src, addr1, sizeof(addr1));
+  ip_addr_ntop(dst, addr2, sizeof(addr2));
+  debugf("%s => %s, protocol=%u, len=%zu", addr1, addr2, protocol, len);
+  if (src == IP_ADDR_ANY) {
+    errorf("src address is not specified");
+    return -1;
+  }
+  iface = ip_iface_select(src);
+  if (!iface) {
+    errorf("no such interface");
+    return -1;
+  }
+  if ((dst & iface->netmask) != (iface->unicast & iface->netmask) &&
+      dst != IP_ADDR_BROADCAST) {
+    errorf("not reached, dst=%s", addr2);
+    return -1;
+  }
+  if (NET_IFACE(iface)->dev->mtu < IP_HDR_SIZE_MIN + len) {
+    errorf("too long, dev=%s, mtu=%u, len=%zu", NET_IFACE(iface)->dev->name,
+           NET_IFACE(iface)->dev->mtu, len);
+    return -1;
+  }
+  id = random16();
+  plen =
+      ip_build_packet(protocol, data, len, id, 0, src, dst, buf, sizeof(buf));
+  if (plen == -1) {
+    errorf("ip_build_packet() failure");
+    return -1;
+  }
+  if (ip_output_device(iface, buf, plen, dst) == -1) {
+    errorf("ip_output_device() failure");
+    return -1;
+  }
+  return plen;
 }
 
 int
