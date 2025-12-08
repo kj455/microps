@@ -46,8 +46,8 @@ clean:
 
 tap:
 	@ip addr show $(TAPDEV) 2>/dev/null || (echo "Create '$(TAPDEV)'"; \
-	  sudo ip tuntap add mode tap user $(USER) name $(TAPDEV); \
-	  sudo sysctl -w net.ipv6.conf.$(TAPDEV).disable_ipv6=1; \
+	  sudo ip tuntap add mode tap user $${USER:-root} name $(TAPDEV); \
+	  sudo sysctl -w net.ipv6.conf.$(TAPDEV).disable_ipv6=1 2>/dev/null || true; \
 	  sudo ip addr add $(TAPADDR) dev $(TAPDEV); \
 	  sudo ip link set $(TAPDEV) up; \
 	  ip addr show $(TAPDEV); \
