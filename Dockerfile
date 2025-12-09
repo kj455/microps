@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     libpcap-dev \
     net-tools \
     vim \
+    git \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # 作業ディレクトリを設定
