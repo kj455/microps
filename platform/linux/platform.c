@@ -7,7 +7,6 @@
 #include "platform.h"
 
 #include "intr.h"
-#include "util.h"
 
 int platform_init(void) {
   srandom(time(NULL));

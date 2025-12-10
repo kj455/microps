@@ -1,18 +1,18 @@
-#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
+#include "arp.h"
 #include "icmp.h"
 #include "ip.h"
-#include "platform.h"
-
-#include "util.h"
 #include "net.h"
+#include "platform.h"
+#include "util.h"
 
 struct net_protocol {
-    struct net_protocol *next;
-    uint16_t type;
-    net_protocol_handler_t handler;
+  struct net_protocol *next;
+  uint16_t type;
+  net_protocol_handler_t handler;
 };
 
 /*
@@ -62,9 +62,7 @@ static int net_device_open(struct net_device *dev) {
   return 0;
 }
 
-static int
-net_device_close(struct net_device *dev)
-{
+static int net_device_close(struct net_device *dev) {
   infof("dev=%s", dev->name);
   if (!NET_DEVICE_IS_UP(dev)) {
     errorf("device closed, dev=%s", dev->name);
@@ -108,9 +106,7 @@ int net_device_output(struct net_device *dev, uint16_t type,
 /*
  * NOTE: must not be call after net_run()
  */
-int
-net_device_add_iface(struct net_device *dev, struct net_iface *iface)
-{
+int net_device_add_iface(struct net_device *dev, struct net_iface *iface) {
   struct net_iface *entry;
 
   for (entry = dev->ifaces; entry; entry = entry->next) {
@@ -142,9 +138,7 @@ struct net_iface *net_device_get_iface(struct net_device *dev, int family) {
 /*
  * NOTE: must not be call after net_run()
  */
-int
-net_protocol_register(uint16_t type, net_protocol_handler_t handler)
-{
+int net_protocol_register(uint16_t type, net_protocol_handler_t handler) {
   struct net_protocol *proto;
 
   for (proto = protocols; proto; proto = proto->next) {
@@ -182,24 +176,26 @@ int net_input(uint16_t type, const uint8_t *data, size_t len,
   return 0;
 }
 
-int
-net_init(void)
-{
-    infof("initialize...");
-    if (platform_init() == -1) {
-        errorf("platform_init() failure");
-        return -1;
-    }
-    if (ip_init() == -1) {
-      errorf("ip_init() failure");
-      return -1;
-    }
-    if (icmp_init() == -1) {
-      errorf("icmp_init() failure");
-      return -1;
-    }
-    infof("success");
-    return 0;
+int net_init(void) {
+  infof("initialize...");
+  if (platform_init() == -1) {
+    errorf("platform_init() failure");
+    return -1;
+  }
+  if (arp_init() == -1) {
+    errorf("arp_init() failure");
+    return -1;
+  }
+  if (ip_init() == -1) {
+    errorf("ip_init() failure");
+    return -1;
+  }
+  if (icmp_init() == -1) {
+    errorf("icmp_init() failure");
+    return -1;
+  }
+  infof("success");
+  return 0;
 }
 
 int net_run(void) {
