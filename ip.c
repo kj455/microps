@@ -1,16 +1,17 @@
-#include <stdio.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 
+#include "arp.h"
 #include "icmp.h"
 #include "platform.h"
 
-#include "util.h"
-#include "net.h"
 #include "ip.h"
+#include "net.h"
+#include "util.h"
 
 #define IP_HDR_FLAG_MF 0x2000 /* more flagments flag */
 #define IP_HDR_FLAG_DF 0x4000 /* don't flagment flag */
@@ -19,12 +20,12 @@
 #define IP_HDR_OFFSET_MASK 0x1fff
 
 struct ip_protocol {
-    struct ip_protocol *next;
-    uint8_t protocol;
-    ip_protocol_handler_t handler;
+  struct ip_protocol *next;
+  uint8_t protocol;
+  ip_protocol_handler_t handler;
 };
 
-const ip_addr_t IP_ADDR_ANY       = 0x00000000; /* 0.0.0.0 */
+const ip_addr_t IP_ADDR_ANY = 0x00000000;       /* 0.0.0.0 */
 const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
 
 /*
@@ -34,29 +35,27 @@ const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
 static struct ip_iface *ifaces;
 static struct ip_protocol *protocols;
 
-int
-ip_addr_pton(const char *p, ip_addr_t *n)
-{
-    char *sp, *ep;
-    int idx;
-    long ret;
+int ip_addr_pton(const char *p, ip_addr_t *n) {
+  char *sp, *ep;
+  int idx;
+  long ret;
 
-    sp = (char *)p;
-    for (idx = 0; idx < 4; idx++) {
-        ret = strtol(sp, &ep, 10);
-        if (ret < 0 || ret > 255) {
-            return -1;
-        }
-        if (ep == sp) {
-            return -1;
-        }
-        if ((idx == 3 && *ep != '\0') || (idx != 3 && *ep != '.')) {
-            return -1;
-        }
-        ((uint8_t *)n)[idx] = ret;
-        sp = ep + 1;
+  sp = (char *)p;
+  for (idx = 0; idx < 4; idx++) {
+    ret = strtol(sp, &ep, 10);
+    if (ret < 0 || ret > 255) {
+      return -1;
     }
-    return 0;
+    if (ep == sp) {
+      return -1;
+    }
+    if ((idx == 3 && *ep != '\0') || (idx != 3 && *ep != '.')) {
+      return -1;
+    }
+    ((uint8_t *)n)[idx] = ret;
+    sp = ep + 1;
+  }
+  return 0;
 }
 
 struct ip_iface *ip_iface_alloc(const char *unicast, const char *netmask) {
@@ -119,14 +118,12 @@ struct ip_iface *ip_iface_select(ip_addr_t addr) {
   return entry;
 }
 
-char *
-ip_addr_ntop(ip_addr_t n, char *p, size_t size)
-{
-    uint8_t *u8;
+char *ip_addr_ntop(ip_addr_t n, char *p, size_t size) {
+  uint8_t *u8;
 
-    u8 = (uint8_t *)&n;
-    snprintf(p, size, "%d.%d.%d.%d", u8[0], u8[1], u8[2], u8[3]);
-    return p;
+  u8 = (uint8_t *)&n;
+  snprintf(p, size, "%d.%d.%d.%d", u8[0], u8[1], u8[2], u8[3]);
+  return p;
 }
 
 static void ip_print(const uint8_t *data, size_t len) {
@@ -188,9 +185,7 @@ int ip_protocol_register(uint8_t protocol, ip_protocol_handler_t handler) {
   return 0;
 }
 
-static void
-ip_input(const uint8_t *data, size_t len, struct net_device *dev)
-{
+static void ip_input(const uint8_t *data, size_t len, struct net_device *dev) {
   struct ip_hdr *hdr;
   uint8_t v;
   uint16_t hlen, total, offset;
@@ -266,6 +261,7 @@ static int ip_output_device(struct ip_iface *iface, const uint8_t *data,
                             size_t len, ip_addr_t target) {
   char addr[IP_ADDR_STR_LEN];
   uint8_t hwaddr[NET_DEVICE_ADDR_LEN] = {};
+  int ret;
 
   ip_addr_ntop(target, addr, sizeof(addr));
   debugf("dev=%s, len=%zu, target=%s", NET_IFACE(iface)->dev->name, len, addr);
@@ -274,8 +270,10 @@ static int ip_output_device(struct ip_iface *iface, const uint8_t *data,
       memcpy(hwaddr, NET_IFACE(iface)->dev->broadcast,
              NET_IFACE(iface)->dev->alen);
     } else {
-      errorf("arp not supported");
-      return -1;
+      ret = arp_resolve(NET_IFACE(iface), target, hwaddr);
+      if (ret != ARP_RESOLVE_FOUND) {
+        return ret;
+      }
     }
   }
   return net_device_output(NET_IFACE(iface)->dev, NET_PROTOCOL_TYPE_IP, data,
@@ -357,12 +355,10 @@ ssize_t ip_output(uint8_t protocol, const uint8_t *data, size_t len,
   return plen;
 }
 
-int
-ip_init(void)
-{
-    if (net_protocol_register(NET_PROTOCOL_TYPE_IP, ip_input) == -1) {
-        errorf("net_protocol_register() failure");
-        return -1;
-    }
-    return 0;
+int ip_init(void) {
+  if (net_protocol_register(NET_PROTOCOL_TYPE_IP, ip_input) == -1) {
+    errorf("net_protocol_register() failure");
+    return -1;
+  }
+  return 0;
 }
