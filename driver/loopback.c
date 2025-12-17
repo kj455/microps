@@ -1,9 +1,9 @@
-#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
-#include "util.h"
 #include "net.h"
+#include "util.h"
 
 #define LOOPBACK_MTU UINT16_MAX /* Maximum size of IP datagram */
 
@@ -28,6 +28,7 @@ struct net_device *loopback_init(void) {
   }
   dev->type = NET_DEVICE_TYPE_LOOPBACK;
   dev->mtu = LOOPBACK_MTU;
+  dev->flags = NET_DEVICE_FLAG_LOOPBACK;
   dev->hlen = 0; /* no-header */
   dev->alen = 0; /* no address */
   dev->ops = &loopback_ops;

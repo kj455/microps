@@ -12,6 +12,7 @@
 #include "icmp.h"
 #include "ip.h"
 #include "net.h"
+#include "sched.h"
 #include "util.h"
 
 #define UDP_PCB_SIZE 16
@@ -40,6 +41,7 @@ struct udp_pcb {
   int state;
   ip_endp_t local;
   struct queue queue; /* receive queue */
+  struct sched_task task;
 };
 
 struct udp_queue_entry {
@@ -87,6 +89,12 @@ static struct udp_pcb *udp_pcb_alloc(void) {
 
 static void udp_pcb_release(struct udp_pcb *pcb) {
   struct queue_entry *entry;
+  pcb->state = UDP_PCB_STATE_CLOSING;
+  if (sched_task_destroy(&pcb->task) != 0) {
+    debugf("pending, desc=%d", udp_pcb_desc(pcb));
+    sched_task_wakeup(&pcb->task);
+    return;
+  }
   pcb->state = UDP_PCB_STATE_FREE;
   pcb->local.addr = IP_ADDR_ANY;
   pcb->local.port = 0;
@@ -98,6 +106,7 @@ static void udp_pcb_release(struct udp_pcb *pcb) {
     debugf("free queue entry");
     memory_free(entry);
   }
+  debugf("success, desc=%d", udp_pcb_desc(pcb));
 }
 
 static struct udp_pcb *udp_pcb_select(ip_endp_t key) {
@@ -114,8 +123,6 @@ static struct udp_pcb *udp_pcb_select(ip_endp_t key) {
   }
   return NULL;
 }
-static ssize_t udp_output(ip_endp_t src, ip_endp_t dst, const uint8_t *data,
-                          size_t len) {}
 
 static void udp_print(const uint8_t *data, size_t len) {
   struct udp_hdr *hdr;
@@ -133,6 +140,47 @@ static void udp_print(const uint8_t *data, size_t len) {
   hexdump(stderr, data, MIN(len, total));
 #endif
   funlockfile(stderr);
+}
+
+static ssize_t udp_output(ip_endp_t src, ip_endp_t dst, const uint8_t *data,
+                          size_t len) {
+  uint8_t buf[IP_PAYLOAD_SIZE_MAX];
+  struct udp_hdr *hdr;
+  struct pseudo_hdr pseudo;
+  uint16_t total, psum = 0;
+  char endp1[IP_ENDP_STR_LEN];
+  char endp2[IP_ENDP_STR_LEN];
+
+  if (IP_PAYLOAD_SIZE_MAX < sizeof(*hdr) + len) {
+    errorf("too large UDP payload: %zu", len);
+    return -1;
+  }
+  hdr = (struct udp_hdr *)buf;
+  hdr->src = src.port;
+  hdr->dst = dst.port;
+  total = (sizeof(*hdr) + len);
+  hdr->len = hton16(total);
+  hdr->sum = 0;
+  memcpy(hdr + 1, data, len);
+  // compute checksum
+  pseudo.src = src.addr;
+  pseudo.dst = dst.addr;
+  pseudo.zero = 0;
+  pseudo.protocol = IP_PROTOCOL_UDP;
+  pseudo.len = hton16(total);
+  psum = ~cksum16((uint16_t *)&pseudo, sizeof(pseudo), 0);
+  hdr->sum = cksum16((uint16_t *)hdr, total, psum);
+  if (!hdr->sum) {
+    hdr->sum = 0xffff;
+  }
+  debugf("%s => %s, len=%zu", ip_endp_ntop(src, endp1, sizeof(endp1)),
+         ip_endp_ntop(dst, endp2, sizeof(endp2)), len);
+  udp_print(buf, total);
+  if (ip_output(IP_PROTOCOL_UDP, buf, total, src.addr, dst.addr) == -1) {
+    errorf("ip_output() failure");
+    return -1;
+  }
+  return len;
 }
 
 static void udp_input(const struct ip_hdr *iphdr, const uint8_t *data,
@@ -195,14 +243,15 @@ static void udp_input(const struct ip_hdr *iphdr, const uint8_t *data,
   }
   entry->remote = src;
   entry->len = len - sizeof(*hdr);
-  memcpy(entry + 1, data + sizeof(*hdr), entry->len);
+  memcpy(entry + 1, hdr + 1, entry->len);
   if (!queue_push(&pcb->queue, (struct queue_entry *)entry)) {
     lock_release(&lock);
     errorf("queue_push() failed");
     return;
   }
-  debugf("queue_push succrss, desc=%d, num=%d", udp_pcb_desc(pcb),
+  debugf("queue_push success, desc=%d, num=%d", udp_pcb_desc(pcb),
          pcb->queue.num);
+  sched_task_wakeup(&pcb->task);
   lock_release(&lock);
 }
 
@@ -278,6 +327,94 @@ int udp_cmd_bind(int desc, ip_endp_t local) {
 }
 
 ssize_t udp_cmd_recvfrom(int desc, uint8_t *buf, size_t size,
-                         ip_endp_t *remote) {}
+                         ip_endp_t *remote) {
+  struct udp_pcb *pcb;
+  struct udp_queue_entry *entry;
+  ssize_t len;
 
-ssize_t udp_cmd_sendto(int desc, uint8_t *data, size_t len, ip_endp_t remote) {}
+  lock_acquire(&lock);
+  pcb = udp_pcb_get(desc);
+  if (!pcb) {
+    lock_release(&lock);
+    errorf("invalid desc: %d", desc);
+    return -1;
+  }
+  while (1) {
+    entry = (struct udp_queue_entry *)queue_pop(&pcb->queue);
+    if (entry) {
+      debugf("queue_pop success, desc=%d, num=%d", desc, pcb->queue.num);
+      break;
+    }
+    debugf("queue_pop: empty, desc=%d, wait...", desc);
+    if (sched_task_sleep(&pcb->task, &lock, NULL) == -1) {
+      debugf("interrupted");
+      lock_release(&lock);
+      errno = EINTR;
+      return -1;
+    }
+    debugf("wakeup");
+    if (pcb->state == UDP_PCB_STATE_CLOSING) {
+      debugf("closing");
+      lock_release(&lock);
+      errno = EBADF;
+      return -1;
+    }
+  }
+  lock_release(&lock);
+  if (remote) {
+    *remote = entry->remote;
+  }
+  len = MIN(size, entry->len);
+  memcpy(buf, entry + 1, len);
+  memory_free(entry);
+  return len;
+}
+
+ssize_t udp_cmd_sendto(int desc, uint8_t *data, size_t len, ip_endp_t remote) {
+  struct udp_pcb *pcb;
+  ip_endp_t local;
+  uint32_t p;
+  struct ip_iface *iface;
+  char addr[IP_ADDR_STR_LEN];
+
+  lock_acquire(&lock);
+  pcb = udp_pcb_get(desc);
+  if (!pcb) {
+    lock_release(&lock);
+    errorf("pcb not found, desc=%d", desc);
+    return -1;
+  }
+  local = pcb->local;
+  // dynamic port assignment
+  if (!local.port) {
+    for (p = IP_ENDP_DYNAMIC_PORT_MIN; p <= IP_ENDP_DYNAMIC_PORT_MAX; p++) {
+      local.port = hton16(p);
+      if (!udp_pcb_select(local)) {
+        pcb->local.port = local.port;
+        debugf("dinamic assign local port, port=%d", ntoh16(pcb->local.port));
+        break;
+      }
+    }
+    if (IP_ENDP_DYNAMIC_PORT_MAX < p) {
+      debugf("failed to dinamic assign local port, addr=%s",
+             ip_addr_ntop(local.addr, addr, sizeof(addr)));
+      lock_release(&lock);
+      return -1;
+    }
+  }
+  // select local address
+  if (local.addr == IP_ADDR_ANY) {
+    iface = ip_route_get_iface(remote.addr);
+    if (!iface) {
+      errorf("iface not found that can reach foreign address, addr=%s",
+             ip_addr_ntop(remote.addr, addr, sizeof(addr)));
+      lock_release(&lock);
+      return -1;
+    }
+    local.addr = iface->unicast;
+    debugf("select local address, addr=%s",
+           ip_addr_ntop(local.addr, addr, sizeof(addr)));
+  }
+  lock_release(&lock);
+  return udp_output(local, remote, data, len);
+}

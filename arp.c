@@ -249,7 +249,7 @@ static void arp_input(const uint8_t *data, size_t len, struct net_device *dev) {
       lock_release(&lock);
     }
     if (ntoh16(msg->hdr.op) == ARP_OP_REQUEST) {
-      arp_reply(iface, msg->sha, spa, msg->tha);
+      arp_reply(iface, msg->sha, spa, msg->sha);
     }
   }
 }
