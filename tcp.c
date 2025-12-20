@@ -71,12 +71,12 @@ struct tcp_hdr {
 
 // 送信シーケンス変数
 struct snd_vars {
-  uint32_t nxt;
-  uint32_t una;
-  uint16_t wnd;
-  uint16_t up;
-  uint32_t wl1;
-  uint32_t wl2;
+  uint32_t nxt; // next sequence number to be sent
+  uint32_t una; // oldest unacknowledged sequence number
+  uint16_t wnd; // send windown size
+  uint16_t up;  // urgent pointer
+  uint32_t wl1; // segment sequence number used for last window update
+  uint32_t wl2; // segment acknowledgment number used for last window update
 };
 
 // 受信シーケンス変数
@@ -212,7 +212,7 @@ static void tcp_print(const uint8_t *data, size_t len) {
     }
   }
 #ifdef HEXDUMP
-  hexdump(stderr, data + sizeof(*hdr), len - sizeof(*hdr));
+  hexdump(stderr, data, len);
 #endif
   funlockfile(stderr);
 }
@@ -342,6 +342,7 @@ static void tcp_segment_arrives(struct seg_info *seg, uint8_t flags,
                                 const uint8_t *data, size_t len,
                                 ip_endp_t local, ip_endp_t remote) {
   struct tcp_pcb *pcb;
+  int acceptable = 0;
   pcb = tcp_pcb_select(local, remote);
   /**
    * ex.
@@ -409,6 +410,49 @@ static void tcp_segment_arrives(struct seg_info *seg, uint8_t flags,
     /*
      * 1st check the ACK bit
      */
+    switch (pcb->state) {
+    case TCP_STATE_SYN_RECEIVED:
+    case TCP_STATE_ESTABLISHED:
+      if (!seg->len) {
+        if (!pcb->rcv.wnd) {
+          // segment has no control information and window is zero
+          if (seg->seq == pcb->rcv.nxt) {
+            acceptable = 1;
+          }
+        } else {
+          // windown has capacity
+          if (pcb->rcv.nxt <= seg->seq &&
+              seg->seq < pcb->rcv.nxt + pcb->rcv.wnd) {
+            acceptable = 1;
+          }
+        }
+      } else {
+        if (!pcb->rcv.wnd) {
+          // not acceptable
+        } else {
+          if ((pcb->rcv.nxt <= seg->seq &&
+               seg->seq < pcb->rcv.nxt + pcb->rcv.wnd) ||
+              (pcb->rcv.nxt <= seg->seq + seg->len - 1 &&
+               seg->seq + seg->len - 1 < pcb->rcv.nxt + pcb->rcv.wnd)) {
+            acceptable = 1;
+          }
+        }
+      }
+      if (!acceptable) {
+        if (!TCP_FLG_ISSET(flags, TCP_FLG_RST)) {
+          tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
+        }
+        return;
+      }
+      /**
+       * In the following it is assumed that the segment is the idealized
+       * segment that begins at RCV.NXT and does not exceed the window. One
+       * could tailor actual segments to fit this assumption by trimming off any
+       * portions that lie outside the window (including SYN and FIN), and only
+       * processing further if the segment then begins at RCV.NXT. Segments with
+       * higher begining sequence numbers may be held for later processing.
+       */
+    }
 
     /*
      * 2nd check the RST bit
@@ -459,11 +503,33 @@ static void tcp_segment_arrives(struct seg_info *seg, uint8_t flags,
   }
   switch (pcb->state) {
   case TCP_STATE_SYN_RECEIVED:
-    if (pcb->snd.una < seg->ack && seg->ack <= pcb->snd.nxt) {
+    if (pcb->snd.una <= seg->ack && seg->ack <= pcb->snd.nxt) {
       TCP_STATE_CHANGE(pcb, TCP_STATE_ESTABLISHED);
       sched_task_wakeup(&pcb->task);
     } else {
       tcp_output_segment(seg->ack, 0, TCP_FLG_RST, 0, NULL, 0, local, remote);
+      return;
+    }
+    // fall through
+  case TCP_STATE_ESTABLISHED:
+    if (pcb->snd.una < seg->ack && seg->ack <= pcb->snd.nxt) {
+      // ack for sent and unacknowledged data
+      pcb->snd.una = seg->ack;
+      // TODO: any segments on the retransmission queue which are thereby
+      // entirely acknowledged are removed
+      // ignore: Users should receive positive acknowledgments for buffers which
+      // have been sent and fully acknowledged
+      // i.e., SEND buffer should be returned with "ok" response
+      if (pcb->snd.wl1 < seg->seq ||
+          (pcb->snd.wl1 == seg->seq && pcb->snd.wl2 <= seg->ack)) {
+        pcb->snd.wnd = seg->wnd;
+        pcb->snd.wl1 = seg->seq;
+        pcb->snd.wl2 = seg->ack;
+      }
+    } else if (seg->ack < pcb->snd.una) {
+      // ignore
+    } else if (pcb->snd.nxt < seg->ack) {
+      tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
       return;
     }
     break;
@@ -476,6 +542,23 @@ static void tcp_segment_arrives(struct seg_info *seg, uint8_t flags,
   /*
    * 7th, process the segment text
    */
+  switch (pcb->state) {
+  case TCP_STATE_ESTABLISHED:
+    if (len) {
+      if (pcb->rcv.nxt != seg->seq || pcb->rcv.wnd < len) {
+        // note: request the optimal segment
+        tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
+        return;
+      }
+      debugf("copy segment text, len=%zu, wnd=%u", len, pcb->rcv.wnd);
+      memcpy(pcb->buf + (sizeof(pcb->buf) - pcb->rcv.wnd), data, len);
+      pcb->rcv.nxt = seg->seq + len;
+      pcb->rcv.wnd -= len;
+      tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
+      sched_task_wakeup(&pcb->task);
+    }
+    break;
+  }
 
   /*
    * 8th, check the FIN bit
@@ -563,7 +646,7 @@ int tcp_cmd_open(ip_endp_t local, ip_endp_t remote, int active) {
   lock_acquire(&lock);
   pcb = tcp_pcb_alloc();
   if (!pcb) {
-    errorf("tcp_pcb_alloc() failed");
+    errorf("tcp_pcb_alloc() failure");
     lock_release(&lock);
     return -1;
   }
@@ -571,14 +654,14 @@ int tcp_cmd_open(ip_endp_t local, ip_endp_t remote, int active) {
          ip_endp_ntop(local, ep1, sizeof(ep1)),
          ip_endp_ntop(remote, ep2, sizeof(ep2)));
   if (active) {
-    errorf("active open is not implemented");
+    errorf("active open does not implement");
     tcp_pcb_release(pcb);
     lock_release(&lock);
     return -1;
   } else {
     // check for existing connection
     if (tcp_pcb_select(local, remote)) {
-      errorf("connection already exists");
+      errorf("address already in use");
       tcp_pcb_release(pcb);
       lock_release(&lock);
       return -1;
@@ -605,11 +688,9 @@ AGAIN:
     if (pcb->state == TCP_STATE_SYN_RECEIVED) {
       goto AGAIN;
     }
-    errorf("open error: state=%s, (%d)", tcp_state_ntoa(pcb->state),
-           pcb->state);
+    errorf("open error: state=%s (%d)", tcp_state_ntoa(pcb->state), pcb->state);
     TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
     tcp_pcb_release(pcb);
-    lock_release(&lock);
     lock_release(&lock);
     return -1;
   }
@@ -646,12 +727,90 @@ int tcp_cmd_close(int desc) {
   return 0;
 }
 
-ssize_t
-tcp_cmd_send(int desc, uint8_t *data, size_t len)
-{
+ssize_t tcp_cmd_send(int desc, uint8_t *data, size_t len) {
+  struct tcp_pcb *pcb;
+  ssize_t sent = 0;
+  size_t cap, slen;
+
+  lock_acquire(&lock);
+  pcb = tcp_pcb_get(desc);
+  if (!pcb) {
+    errorf("invalid desc=%d", desc);
+    lock_release(&lock);
+    return -1;
+  }
+RETRY:
+  switch (pcb->state) {
+  case TCP_STATE_ESTABLISHED:
+    while (sent < (ssize_t)len) {
+      cap = pcb->snd.wnd - (pcb->snd.nxt - pcb->snd.una);
+      if (!cap) {
+        if (sched_task_sleep(&pcb->task, &lock, NULL) != 0) {
+          debugf("interrupted");
+          if (!sent) {
+            lock_release(&lock);
+            errno = EINTR;
+            return -1;
+          }
+          break;
+        }
+        goto RETRY;
+      }
+      slen = MIN(MIN(pcb->mss, len - sent), cap);
+      if (tcp_output(pcb, TCP_FLG_ACK | TCP_FLG_PSH, data + sent, slen) == -1) {
+        errorf("tcp_output() failed");
+        TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+        tcp_pcb_release(pcb);
+        lock_release(&lock);
+        return -1;
+      }
+      pcb->snd.nxt += slen;
+      sent += slen;
+    }
+    break;
+  default:
+    errorf("invalid state: '%u'", pcb->state);
+    lock_release(&lock);
+    return -1;
+  }
+  lock_release(&lock);
+  return sent;
 }
 
-ssize_t
-tcp_cmd_receive(int desc, uint8_t *buf, size_t size)
-{
+ssize_t tcp_cmd_receive(int desc, uint8_t *buf, size_t size) {
+  struct tcp_pcb *pcb;
+  size_t remain, len;
+
+  lock_acquire(&lock);
+  pcb = tcp_pcb_get(desc);
+  if (!pcb) {
+    errorf("invalid desc=%d", desc);
+    lock_release(&lock);
+    return -1;
+  }
+RETRY:
+  switch (pcb->state) {
+  case TCP_STATE_ESTABLISHED:
+    remain = sizeof(pcb->buf) - pcb->rcv.wnd;
+    if (!remain) {
+      if (sched_task_sleep(&pcb->task, &lock, NULL) != 0) {
+        debugf("interrupted");
+        lock_release(&lock);
+        errno = EINTR;
+        return -1;
+      }
+      goto RETRY;
+    }
+    break;
+  default:
+    errorf("invalid state: '%u'", pcb->state);
+    lock_release(&lock);
+    return -1;
+  }
+  len = MIN(size, remain);
+  memcpy(buf, pcb->buf, len);
+  memmove(pcb->buf, pcb->buf + len, remain - len);
+  pcb->rcv.wnd += len;
+  lock_release(&lock);
+  return len;
 }

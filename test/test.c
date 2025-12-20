@@ -92,6 +92,8 @@ static int cleanup(void) {
 static int app_main(void) {
   int desc;
   ip_endp_t local, remote;
+  uint8_t buf[128];
+  ssize_t n;
 
   ip_endp_pton("0.0.0.0:7", &local);
   ip_endp_pton("0.0.0.0:0", &remote);
@@ -102,7 +104,13 @@ static int app_main(void) {
   }
   debugf("press Ctrl+C to terminate");
   while (!terminate) {
-    sleep(1);
+    n = tcp_cmd_receive(desc, buf, sizeof(buf));
+    if (n <= 0) {
+      break;
+    }
+    debugf("%zd bytes received", n);
+    hexdump(stderr, buf, n);
+    tcp_cmd_send(desc, buf, n);
   }
   tcp_cmd_close(desc);
   debugf("terminated");
