@@ -521,49 +521,6 @@ static void tcp_segment_arrives(struct seg_info *seg, uint8_t flags,
     /*
      * 1st check the ACK bit
      */
-    switch (pcb->state) {
-    case TCP_STATE_SYN_RECEIVED:
-    case TCP_STATE_ESTABLISHED:
-      if (!seg->len) {
-        if (!pcb->rcv.wnd) {
-          // segment has no control information and window is zero
-          if (seg->seq == pcb->rcv.nxt) {
-            acceptable = 1;
-          }
-        } else {
-          // windown has capacity
-          if (pcb->rcv.nxt <= seg->seq &&
-              seg->seq < pcb->rcv.nxt + pcb->rcv.wnd) {
-            acceptable = 1;
-          }
-        }
-      } else {
-        if (!pcb->rcv.wnd) {
-          // not acceptable
-        } else {
-          if ((pcb->rcv.nxt <= seg->seq &&
-               seg->seq < pcb->rcv.nxt + pcb->rcv.wnd) ||
-              (pcb->rcv.nxt <= seg->seq + seg->len - 1 &&
-               seg->seq + seg->len - 1 < pcb->rcv.nxt + pcb->rcv.wnd)) {
-            acceptable = 1;
-          }
-        }
-      }
-      if (!acceptable) {
-        if (!TCP_FLG_ISSET(flags, TCP_FLG_RST)) {
-          tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
-        }
-        return;
-      }
-      /**
-       * In the following it is assumed that the segment is the idealized
-       * segment that begins at RCV.NXT and does not exceed the window. One
-       * could tailor actual segments to fit this assumption by trimming off any
-       * portions that lie outside the window (including SYN and FIN), and only
-       * processing further if the segment then begins at RCV.NXT. Segments with
-       * higher begining sequence numbers may be held for later processing.
-       */
-    }
     if (TCP_FLG_ISSET(flags, TCP_FLG_ACK)) {
       if (seg->ack <= pcb->iss || seg->ack > pcb->snd.nxt) {
         tcp_output_segment(seg->ack, 0, TCP_FLG_RST, 0, NULL, 0, local, remote);
@@ -624,6 +581,48 @@ static void tcp_segment_arrives(struct seg_info *seg, uint8_t flags,
   /*
    * 1st check sequence number
    */
+  switch (pcb->state) {
+  case TCP_STATE_SYN_RECEIVED:
+  case TCP_STATE_ESTABLISHED:
+    if (!seg->len) {
+      if (!pcb->rcv.wnd) {
+        if (seg->seq == pcb->rcv.nxt) {
+          acceptable = 1;
+        }
+      } else {
+        if (pcb->rcv.nxt <= seg->seq &&
+            seg->seq < pcb->rcv.nxt + pcb->rcv.wnd) {
+          acceptable = 1;
+        }
+      }
+    } else {
+      if (!pcb->rcv.wnd) {
+        /* not acceptable */
+      } else {
+        if ((pcb->rcv.nxt <= seg->seq &&
+             seg->seq < pcb->rcv.nxt + pcb->rcv.wnd) ||
+            (pcb->rcv.nxt <= seg->seq + seg->len - 1 &&
+             seg->seq + seg->len - 1 < pcb->rcv.nxt + pcb->rcv.wnd)) {
+          acceptable = 1;
+        }
+      }
+    }
+    if (!acceptable) {
+      if (!TCP_FLG_ISSET(flags, TCP_FLG_RST)) {
+        tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
+      }
+      return;
+    }
+    /*
+     * In the following it is assumed that the segment is the idealized
+     * segment that begins at RCV.NXT and does not exceed the window.
+     * One could tailor actual segments to fit this assumption by
+     * trimming off any portions that lie outside the window (including
+     * SYN and FIN), and only processing further if the segment then
+     * begins at RCV.NXT.  Segments with higher begining sequence
+     * numbers may be held for later processing.
+     */
+  }
 
   /*
    * 2nd check the RST bit
